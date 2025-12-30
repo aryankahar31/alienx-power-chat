@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlienX Power Chat</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .chat-container { height: calc(100vh - 220px); overflow-y: auto; scrollbar-width: none; }
+        .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; }
+        .my-msg { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+        .peer-msg { background: white; color: #333; align-self: flex-start; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+        .system-msg { font-size: 0.75rem; color: #666; text-align: center; width: 100%; margin: 8px 0; }
+        .typing { font-size: 0.8rem; color: #007bff; height: 24px; padding: 0 1rem; }
+        #voice-btn.active { color: red; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <div class="bg-white shadow-md p-4 flex justify-between items-center border-b">
+        <div>
+            <h1 class="font-bold text-xl text-blue-600 flex items-center gap-2">
+                ALIENX <span class="text-xs bg-blue-100 px-2 py-1 rounded">V3.0</span>
+            </h1>
+            <p class="text-xs text-gray-600">
+                ID: <span id="my-id" class="font-mono font-bold text-black">---</span> | 
+                <span id="online-count">0</span> Peer(s) Connected
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <input id="peer-id-input" type="text" placeholder="Enter Peer ID" class="border p-2 rounded text-sm w-32 outline-none focus:border-blue-500">
+            <button onclick="connectToPeer()" class="bg-blue-600 text-white px-5 py-2 rounded text-sm font-bold hover:bg-blue-700">Connect</button>
+        </div>
+    </div>
+
+    <div id="chat-box" class="flex-1 p-4 flex flex-col gap-3 chat-container">
+        <div class="system-msg">🔗 Direct P2P Connection (WebRTC) • No server stores messages</div>
+        <div class="system-msg text-orange-600">⚠️ Self-destruct is visual only — screenshots possible</div>
+    </div>
+
+    <div id="typing-ui" class="typing"></div>
+
+    <div class="px-4 py-2 flex gap-4 text-xs text-gray-600 bg-gray-50 border-t">
+        <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" id="sd-mode"> Self-Destruct (10s — visual only)
+        </label>
+        <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" id="anon-mode"> Anon Mode
+        </label>
+        <span class="ml-auto">🔒 WebRTC Encrypted Channel</span>
+    </div>
+
+    <div class="p-4 bg-white border-t flex items-center gap-3">
+        <label class="p-3 cursor-pointer hover:bg-gray-100 rounded-full" title="Send File">
+            <input type="file" id="file-input" class="hidden" onchange="handleFile(this)">
+            📎
+        </label>
+
+        <button id="voice-btn" class="p-3 hover:bg-gray-100 rounded-full text-2xl" title="Hold to Record Voice">
+            🎙️
+        </button>
+
+        <input id="message-input" type="text" placeholder="Type a message..." 
+               class="flex-1 bg-gray-100 p-3 rounded-full px-5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500">
+
+        <button onclick="sendMessage()" class="bg-blue-600 text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-blue-700 shadow-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 rotate-90" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+            </svg>
+        </button>
+    </div>
+
+    <script>
+        let peers = {};
+        let myAlias = "User";
+        let typingTimer;
+
+        // Generate longer unique ID
+        const myId = Math.random().toString(36).substring(2, 10);
+        document.getElementById('my-id').innerText = myId;
+
+        // Prompt for codename (non-blocking fallback)
+        setTimeout(() => {
+            const name = prompt("Enter your codename (optional):")?.trim();
+            myAlias = name || "User-" + myId.substring(0,4);
+        }, 500);
+
+        // PeerJS with TURN servers for better connectivity
+        const peer = new Peer('ax-' + myId, {
+            host: '0.peerjs.com',
+            port: 443,
+            path: '/',
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'turn:numb.viagenie.ca', credential: 'muazkh', username: 'webrtc@live.com' }
+                ]
+            }
+        });
+
+        peer.on('open', () => console.log('My peer ID:', peer.id));
+        peer.on('error', err => console.error('Peer error:', err));
+
+        peer.on('connection', conn => setupConnection(conn));
+
+        function connectToPeer() {
+            const targetId = document.getElementById('peer-id-input').value.trim();
+            if (!targetId || targetId === myId) return alert("Invalid ID");
+            const fullId = 'ax-' + targetId;
+            if (peers[fullId]) return alert("Already connected!");
+            setupConnection(peer.connect(fullId));
+        }
+
+        function setupConnection(conn) {
+            conn.on('open', () => {
+                peers[conn.peer] = conn;
+                updateOnlineCount();
+                broadcast({ type: 'SYNC', from: myId });
+            });
+
+            conn.on('data', data => {
+                if (data.type === 'CHAT') appendMessage(data.user, data.msg, data.time, 'peer-msg', data.sd);
+                if (data.type === 'FILE') appendFile(data.user, data);
+                if (data.type === 'VOICE') appendVoice(data.user, data);
+                if (data.type === 'TYPING') showTyping(data.user);
+                if (data.type === 'SYNC' && data.from !== myId) {
+                    if (!peers['ax-' + data.from]) setupConnection(peer.connect('ax-' + data.from));
+                }
+            });
+
+            conn.on('close', () => {
+                delete peers[conn.peer];
+                updateOnlineCount();
+            });
+
+            conn.on('error', err => console.error('Conn error:', err));
+        }
+
+        function broadcast(data) {
+            Object.values(peers).forEach(conn => {
+                if (conn.open) conn.send(data);
+            });
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            const isAnon = document.getElementById('anon-mode').checked;
+            const user = isAnon ? "Anonymous" : myAlias;
+
+            const data = {
+                type: 'CHAT',
+                msg,
+                user,
+                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                sd: document.getElementById('sd-mode').checked
+            };
+
+            broadcast(data);
+            appendMessage("You", msg, data.time, 'my-msg', data.sd);
+            input.value = '';
+        }
+
+        function appendMessage(user, msg, time, className, selfDestruct = false) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            const msgId = 'msg-' + Date.now();
+            div.id = msgId;
+            div.className = `msg ${className} break-words`;
+            div.innerHTML = `
+                <div class="text-xs font-bold opacity-70 mb-1">${user} <span class="font-normal opacity-50 float-right">${time}</span></div>
+                <div>${msg.replace(/</g, '&lt;')}</div>
+            `;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+
+            if (selfDestruct) {
+                setTimeout(() => {
+                    const el = document.getElementById(msgId);
+                    if (el) el.innerHTML = `<div class="italic text-xs opacity-50">This message was deleted</div>`;
+                }, 10000);
+            }
+        }
+
+        // Debounced typing indicator
+        document.getElementById('message-input').addEventListener('input', () => {
+            broadcast({ type: 'TYPING', user: myAlias });
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => broadcast({ type: 'TYPING', user: null }), 1500);
+        });
+
+        function showTyping(user) {
+            if (!user) {
+                document.getElementById('typing-ui').textContent = '';
+                return;
+            }
+            document.getElementById('typing-ui').textContent = user + ' is typing...';
+        }
+
+        // File sharing
+        function handleFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const data = {
+                    type: 'FILE',
+                    name: file.name,
+                    size: file.size,
+                    body: reader.result,
+                    user: document.getElementById('anon-mode').checked ? "Anonymous" : myAlias,
+                    time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                };
+                broadcast(data);
+                appendFile("You", data);
+            };
+            reader.readAsDataURL(file);
+            input.value = '';
+        }
+
+        function appendFile(user, data) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = `msg ${user === "You" ? "my-msg" : "peer-msg"}`;
+            div.innerHTML = `
+                <div class="text-xs opacity-70 mb-1">${user} sent a file</div>
+                <a href="${data.body}" download="${data.name}" 
+                   class="text-sm underline font-semibold block mt-2">
+                   📄 ${data.name} (${(data.size/1024).toFixed(1)} KB)
+                </a>
+            `;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        // Voice recording - works on mobile too
+        let recorder, audioChunks = [];
+        const voiceBtn = document.getElementById('voice-btn');
+
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    recorder = new MediaRecorder(stream);
+                    recorder.start();
+                    audioChunks = [];
+                    recorder.ondataavailable = e => audioChunks.push(e.data);
+                    recorder.onstop = () => {
+                        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            const data = {
+                                type: 'VOICE',
+                                body: reader.result,
+                                user: document.getElementById('anon-mode').checked ? "Anonymous" : myAlias,
+                                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                            };
+                            broadcast(data);
+                            appendVoice("You", data);
+                        };
+                        reader.readAsDataURL(blob);
+                    };
+                    voiceBtn.classList.add('active');
+                })
+                .catch(err => alert("Mic access denied or unavailable"));
+        }
+
+        function stopRecording() {
+            if (recorder && recorder.state === 'recording') {
+                recorder.stop();
+                recorder.stream.getTracks().forEach(track => track.stop());
+                voiceBtn.classList.remove('active');
+            }
+        }
+
+        // Mouse events (desktop)
+        voiceBtn.addEventListener('mousedown', startRecording);
+        voiceBtn.addEventListener('mouseup', stopRecording);
+        voiceBtn.addEventListener('mouseleave', stopRecording);
+
+        // Touch events (mobile)
+        voiceBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); });
+        voiceBtn.addEventListener('touchend', stopRecording);
+
+        function appendVoice(user, data) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = `msg ${user === "You" ? "my-msg" : "peer-msg"}`;
+            div.innerHTML = `
+                <div class="text-xs opacity-70 mb-2">${user} sent a voice message</div>
+                <audio controls class="w-full max-w-xs"><source src="${data.body}" type="audio/webm"></audio>
+            `;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function updateOnlineCount() {
+            document.getElementById('online-count').innerText = Object.keys(peers).length;
+        }
+
+        // Send on Enter
+        document.getElementById('message-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
