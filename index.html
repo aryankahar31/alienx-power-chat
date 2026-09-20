@@ -7,305 +7,368 @@
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .chat-container { height: calc(100vh - 220px); overflow-y: auto; scrollbar-width: none; }
-        .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; position: relative; }
+        body { background: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .chat-container { height: calc(100vh - 200px); overflow-y: auto; scrollbar-width: none; }
+        .chat-container::-webkit-scrollbar { display: none; }
+        .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; }
         .my-msg { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
         .peer-msg { background: white; color: #333; align-self: flex-start; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
         .system-msg { font-size: 0.75rem; color: #666; text-align: center; width: 100%; margin: 8px 0; }
         .typing { font-size: 0.8rem; color: #007bff; height: 24px; padding: 0 1rem; }
         #voice-btn.active { color: red; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .msg { animation: fadeIn 0.2s ease-out; }
+        .toast { animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s forwards; position: fixed; top: 16px; right: 16px; z-index: 9999; padding: 12px 20px; border-radius: 12px; color: white; font-size: 14px; font-weight: 500; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
+    <div id="toasts"></div>
+
     <div class="bg-white shadow-md p-4 flex justify-between items-center border-b">
         <div>
             <h1 class="font-bold text-xl text-blue-600 flex items-center gap-2">
-                ALIENX <span class="text-xs bg-blue-100 px-2 py-1 rounded">V3.0</span>
+                ALIENX <span class="text-xs bg-blue-100 px-2 py-1 rounded">V4.0</span>
             </h1>
             <p class="text-xs text-gray-600">
-                ID: <span id="my-id" class="font-mono font-bold text-black">---</span> | 
-                <span id="online-count">0</span> Peer(s) Connected
+                ID: <span id="my-id" class="font-mono font-bold text-black cursor-pointer hover:text-blue-600" onclick="copyMyId()" title="Click to copy">---</span>
+                <span id="conn-dot" class="inline-block w-2 h-2 rounded-full bg-yellow-400 ml-1"></span> |
+                <span id="online-count">0</span> Peer(s)
             </p>
         </div>
         <div class="flex gap-2">
-            <input id="peer-id-input" type="text" placeholder="Enter Peer ID" class="border p-2 rounded text-sm w-32 outline-none focus:border-blue-500">
+            <input id="peer-id-input" type="text" placeholder="Paste Peer ID" class="border p-2 rounded text-sm w-40 outline-none focus:border-blue-500 font-mono">
             <button onclick="connectToPeer()" class="bg-blue-600 text-white px-5 py-2 rounded text-sm font-bold hover:bg-blue-700">Connect</button>
         </div>
     </div>
 
     <div id="chat-box" class="flex-1 p-4 flex flex-col gap-3 chat-container">
-        <div class="system-msg">🔗 Direct P2P Connection (WebRTC) • No server stores messages</div>
-        <div class="system-msg text-orange-600">⚠️ Self-destruct is visual only — screenshots possible</div>
+        <div class="system-msg">Direct P2P (WebRTC) - No server stores messages</div>
+        <div class="system-msg text-orange-600">Self-destruct is visual only - screenshots possible</div>
     </div>
 
     <div id="typing-ui" class="typing"></div>
 
     <div class="px-4 py-2 flex gap-4 text-xs text-gray-600 bg-gray-50 border-t">
         <label class="flex items-center gap-1 cursor-pointer">
-            <input type="checkbox" id="sd-mode"> Self-Destruct (10s — visual only)
+            <input type="checkbox" id="sd-mode"> Self-Destruct (10s)
         </label>
         <label class="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" id="anon-mode"> Anon Mode
         </label>
-        <span class="ml-auto">🔒 WebRTC Encrypted Channel</span>
+        <span class="ml-auto">WebRTC Encrypted</span>
     </div>
 
     <div class="p-4 bg-white border-t flex items-center gap-3">
-        <label class="p-3 cursor-pointer hover:bg-gray-100 rounded-full" title="Send File">
+        <label class="p-3 cursor-pointer hover:bg-gray-100 rounded-full" title="Send File (max 25MB)">
             <input type="file" id="file-input" class="hidden" onchange="handleFile(this)">
-            📎
+            <svg width="20" height="20" fill="none" stroke="#666" stroke-width="2" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
         </label>
-
-        <button id="voice-btn" class="p-3 hover:bg-gray-100 rounded-full text-2xl" title="Hold to Record Voice">
-            🎙️
+        <button id="voice-btn" class="p-3 hover:bg-gray-100 rounded-full" title="Hold to Record Voice">
+            <svg width="20" height="20" fill="none" stroke="#666" stroke-width="2" viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         </button>
-
-        <input id="message-input" type="text" placeholder="Type a message..." 
+        <input id="message-input" type="text" placeholder="Type a message..."
                class="flex-1 bg-gray-100 p-3 rounded-full px-5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500">
-
         <button onclick="sendMessage()" class="bg-blue-600 text-white w-12 h-12 rounded-full flex items-center justify-center hover:bg-blue-700 shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 rotate-90" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
             </svg>
         </button>
     </div>
 
+    <!-- Name Modal -->
+    <div id="name-modal" style="position:fixed;inset:0;background:linear-gradient(135deg,#0f172a,#1e293b);display:flex;align-items:center;justify-content:center;z-index:100;padding:1rem;">
+        <div style="background:white;border-radius:20px;padding:2rem;width:100%;max-width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="width:64px;height:64px;background:#dbeafe;border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:1rem;">
+                <svg width="32" height="32" fill="none" stroke="#2563eb" stroke-width="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            </div>
+            <h2 style="font-size:1.5rem;font-weight:bold;color:#0f172a;margin:0 0 0.25rem;">AlienX Power Chat</h2>
+            <p style="color:#94a3b8;font-size:0.8rem;margin:0 0 1.5rem;">P2P Encrypted Messaging</p>
+            <input id="name-input" type="text" maxlength="20" placeholder="Enter your name"
+                   style="width:100%;padding:12px 16px;border:1px solid #e2e8f0;border-radius:12px;font-size:0.9rem;outline:none;box-sizing:border-box;text-align:center;">
+            <button onclick="submitName()" style="width:100%;background:#2563eb;color:white;border:none;padding:14px;border-radius:12px;font-size:0.95rem;font-weight:600;cursor:pointer;margin-top:1rem;">
+                Start Chatting
+            </button>
+            <p style="color:#cbd5e1;font-size:0.65rem;margin-top:0.75rem;">No server, no database, pure P2P</p>
+        </div>
+    </div>
+
     <script>
-        let peers = {};
-        let myAlias = "User";
-        let typingTimer;
+        function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        function sanitizeFile(s) { return s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').substring(0, 200); }
 
-        // Generate longer unique ID
-        const myId = Math.random().toString(36).substring(2, 10);
-        document.getElementById('my-id').innerText = myId;
+        var MAX_FILE = 25 * 1024 * 1024;
+        var myAlias = 'User';
+        var myId = '';
+        var peers = {};
+        var typingTimer = null;
+        var peer = null;
 
-        // Prompt for codename (non-blocking fallback)
-        setTimeout(() => {
-            const name = prompt("Enter your codename (optional):")?.trim();
-            myAlias = name || "User-" + myId.substring(0,4);
-        }, 500);
+        function genId() { return Math.random().toString(36).substring(2, 10); }
 
-        // PeerJS with TURN servers for better connectivity
-        const peer = new Peer('ax-' + myId, {
-            host: '0.peerjs.com',
-            port: 443,
-            path: '/',
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'turn:numb.viagenie.ca', credential: 'muazkh', username: 'webrtc@live.com' }
-                ]
-            }
-        });
-
-        peer.on('open', () => console.log('My peer ID:', peer.id));
-        peer.on('error', err => console.error('Peer error:', err));
-
-        peer.on('connection', conn => setupConnection(conn));
-
-        function connectToPeer() {
-            const targetId = document.getElementById('peer-id-input').value.trim();
-            if (!targetId || targetId === myId) return alert("Invalid ID");
-            const fullId = 'ax-' + targetId;
-            if (peers[fullId]) return alert("Already connected!");
-            setupConnection(peer.connect(fullId));
+        function submitName() {
+            var n = document.getElementById('name-input').value.trim();
+            myAlias = n || 'User-' + genId().substring(0, 4);
+            document.getElementById('name-modal').style.display = 'none';
+            initPeer();
         }
 
-        function setupConnection(conn) {
-            conn.on('open', () => {
-                peers[conn.peer] = conn;
-                updateOnlineCount();
-                broadcast({ type: 'SYNC', from: myId });
-            });
+        document.getElementById('name-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); submitName(); }
+        });
 
-            conn.on('data', data => {
-                if (data.type === 'CHAT') appendMessage(data.user, data.msg, data.time, 'peer-msg', data.sd);
-                if (data.type === 'FILE') appendFile(data.user, data);
-                if (data.type === 'VOICE') appendVoice(data.user, data);
-                if (data.type === 'TYPING') showTyping(data.user);
-                if (data.type === 'SYNC' && data.from !== myId) {
-                    if (!peers['ax-' + data.from]) setupConnection(peer.connect('ax-' + data.from));
+        function initPeer() {
+            myId = genId();
+            peer = new Peer('ax-' + myId, {
+                host: '0.peerjs.com',
+                port: 443,
+                path: '/',
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
                 }
             });
 
-            conn.on('close', () => {
-                delete peers[conn.peer];
-                updateOnlineCount();
+            peer.on('open', function(id) {
+                document.getElementById('my-id').innerText = id;
+                document.getElementById('conn-dot').style.background = '#22c55e';
+                toast('Connected to signaling server', 'green');
             });
 
-            conn.on('error', err => console.error('Conn error:', err));
+            peer.on('connection', function(conn) { setupConn(conn); });
+
+            peer.on('error', function(err) {
+                console.error('PeerJS error:', err);
+                document.getElementById('conn-dot').style.background = '#ef4444';
+                if (err.type === 'unavailable-id') {
+                    toast('ID taken, retrying...', 'red');
+                    setTimeout(function() {
+                        peer.destroy();
+                        initPeer();
+                    }, 1000);
+                } else {
+                    toast('Error: ' + err.type, 'red');
+                }
+            });
+
+            peer.on('disconnected', function() {
+                document.getElementById('conn-dot').style.background = '#eab308';
+                if (!peer.destroyed) {
+                    setTimeout(function() { if (peer.disconnected && !peer.destroyed) peer.reconnect(); }, 2000);
+                }
+            });
+        }
+
+        function setupConn(conn) {
+            conn.on('open', function() {
+                peers[conn.peer] = conn;
+                updateCount();
+                appendSys('Peer connected!');
+                toast('Peer connected!', 'green');
+            });
+            conn.on('data', function(d) {
+                if (!d || !d.type) return;
+                if (d.type === 'CHAT') appendMsg(d.user, d.msg, d.time, false, d.sd);
+                else if (d.type === 'FILE') appendFile(d.user, d);
+                else if (d.type === 'VOICE') appendVoice(d.user, d);
+                else if (d.type === 'TYPING') { if (d.user) showTyping(d.user); else hideTyping(); }
+            });
+            conn.on('close', function() { delete peers[conn.peer]; updateCount(); appendSys('Peer disconnected'); });
+            conn.on('error', function(e) { console.error('Conn error:', e); });
         }
 
         function broadcast(data) {
-            Object.values(peers).forEach(conn => {
-                if (conn.open) conn.send(data);
+            Object.keys(peers).forEach(function(id) {
+                try { if (peers[id].open) peers[id].send(data); } catch(e) {}
             });
         }
 
-        function sendMessage() {
-            const input = document.getElementById('message-input');
-            const msg = input.value.trim();
-            if (!msg) return;
-
-            const isAnon = document.getElementById('anon-mode').checked;
-            const user = isAnon ? "Anonymous" : myAlias;
-
-            const data = {
-                type: 'CHAT',
-                msg,
-                user,
-                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                sd: document.getElementById('sd-mode').checked
-            };
-
-            broadcast(data);
-            appendMessage("You", msg, data.time, 'my-msg', data.sd);
-            input.value = '';
+        function connectToPeer() {
+            var tid = document.getElementById('peer-id-input').value.trim();
+            if (!tid) { toast('Paste a Peer ID first', 'red'); return; }
+            var full = tid.indexOf('ax-') === 0 ? tid : 'ax-' + tid;
+            if (full === peer.id) { toast("That's your own ID", 'red'); return; }
+            if (peers[full]) { toast('Already connected', 'blue'); return; }
+            try {
+                var c = peer.connect(full, { reliable: true });
+                setupConn(c);
+                toast('Connecting...', 'blue');
+            } catch(e) { toast('Connection failed', 'red'); }
         }
 
-        function appendMessage(user, msg, time, className, selfDestruct = false) {
-            const box = document.getElementById('chat-box');
-            const div = document.createElement('div');
-            const msgId = 'msg-' + Date.now();
-            div.id = msgId;
-            div.className = `msg ${className} break-words`;
-            div.innerHTML = `
-                <div class="text-xs font-bold opacity-70 mb-1">${user} <span class="font-normal opacity-50 float-right">${time}</span></div>
-                <div>${msg.replace(/</g, '&lt;')}</div>
-            `;
+        function updateCount() {
+            document.getElementById('online-count').innerText = Object.keys(peers).length;
+        }
+
+        function sendMessage() {
+            var input = document.getElementById('message-input');
+            var msg = input.value.trim();
+            if (!msg) return;
+            var isAnon = document.getElementById('anon-mode').checked;
+            var user = isAnon ? 'Anonymous' : myAlias;
+            var isSD = document.getElementById('sd-mode').checked;
+            var time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            broadcast({ type: 'CHAT', msg: msg, user: user, time: time, sd: isSD });
+            appendMsg('You', msg, time, true, isSD);
+            input.value = '';
+            input.focus();
+        }
+
+        function appendMsg(user, msg, time, isMine, selfDestruct) {
+            var box = document.getElementById('chat-box');
+            var div = document.createElement('div');
+            var id = 'm' + Date.now() + Math.random().toString(36).substring(2, 5);
+            div.id = id;
+            div.className = 'msg ' + (isMine ? 'my-msg' : 'peer-msg');
+            div.innerHTML = '<div class="text-xs font-bold opacity-70 mb-1">' + escapeHtml(user) + ' <span class="font-normal opacity-50 float-right">' + escapeHtml(time) + '</span></div><div>' + escapeHtml(msg) + '</div>';
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
-
             if (selfDestruct) {
-                setTimeout(() => {
-                    const el = document.getElementById(msgId);
-                    if (el) el.innerHTML = `<div class="italic text-xs opacity-50">This message was deleted</div>`;
+                setTimeout(function() {
+                    var el = document.getElementById(id);
+                    if (el) el.remove();
                 }, 10000);
             }
         }
 
-        // Debounced typing indicator
-        document.getElementById('message-input').addEventListener('input', () => {
-            broadcast({ type: 'TYPING', user: myAlias });
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(() => broadcast({ type: 'TYPING', user: null }), 1500);
-        });
-
-        function showTyping(user) {
-            if (!user) {
-                document.getElementById('typing-ui').textContent = '';
-                return;
-            }
-            document.getElementById('typing-ui').textContent = user + ' is typing...';
+        function appendSys(text) {
+            var box = document.getElementById('chat-box');
+            var div = document.createElement('div');
+            div.className = 'system-msg';
+            div.textContent = text;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
         }
 
-        // File sharing
         function handleFile(input) {
-            const file = input.files[0];
+            var file = input.files[0];
             if (!file) return;
-            const reader = new FileReader();
-            reader.onload = () => {
-                const data = {
-                    type: 'FILE',
-                    name: file.name,
-                    size: file.size,
-                    body: reader.result,
-                    user: document.getElementById('anon-mode').checked ? "Anonymous" : myAlias,
-                    time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+            if (file.size > MAX_FILE) { toast('File too large (max 25MB)', 'red'); input.value = ''; return; }
+            var reader = new FileReader();
+            reader.onload = function() {
+                var data = {
+                    type: 'FILE', name: file.name, size: file.size, body: reader.result,
+                    user: document.getElementById('anon-mode').checked ? 'Anonymous' : myAlias,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 };
                 broadcast(data);
-                appendFile("You", data);
+                appendFile('You', data);
             };
             reader.readAsDataURL(file);
             input.value = '';
         }
 
         function appendFile(user, data) {
-            const box = document.getElementById('chat-box');
-            const div = document.createElement('div');
-            div.className = `msg ${user === "You" ? "my-msg" : "peer-msg"}`;
-            div.innerHTML = `
-                <div class="text-xs opacity-70 mb-1">${user} sent a file</div>
-                <a href="${data.body}" download="${data.name}" 
-                   class="text-sm underline font-semibold block mt-2">
-                   📄 ${data.name} (${(data.size/1024).toFixed(1)} KB)
-                </a>
-            `;
+            var box = document.getElementById('chat-box');
+            var isMine = user === 'You';
+            var safeName = sanitizeFile(data.name);
+            var isImg = /^data:image\//.test(data.body);
+            var sizeStr = data.size > 1024*1024 ? (data.size/1024/1024).toFixed(1)+' MB' : (data.size/1024).toFixed(1)+' KB';
+            var div = document.createElement('div');
+            div.className = 'msg ' + (isMine ? 'my-msg' : 'peer-msg');
+            var h = '<div class="text-xs opacity-70 mb-1">' + escapeHtml(user) + ' sent a file</div>';
+            if (isImg) h += '<img src="' + escapeHtml(data.body) + '" style="max-width:100%;max-height:200px;border-radius:8px;cursor:pointer;margin-bottom:8px;" onclick="window.open(this.src,\'_blank\')">';
+            h += '<a href="' + escapeHtml(data.body) + '" download="' + escapeHtml(safeName) + '" style="font-size:0.85rem;text-decoration:underline;font-weight:600;display:block;margin-top:8px;">' + escapeHtml(safeName) + ' (' + sizeStr + ')</a>';
+            div.innerHTML = h;
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
         }
 
-        // Voice recording - works on mobile too
-        let recorder, audioChunks = [];
-        const voiceBtn = document.getElementById('voice-btn');
+        var recorder = null, audioChunks = [];
+        var voiceBtn = document.getElementById('voice-btn');
 
-        function startRecording() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    recorder = new MediaRecorder(stream);
-                    recorder.start();
-                    audioChunks = [];
-                    recorder.ondataavailable = e => audioChunks.push(e.data);
-                    recorder.onstop = () => {
-                        const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                            const data = {
-                                type: 'VOICE',
-                                body: reader.result,
-                                user: document.getElementById('anon-mode').checked ? "Anonymous" : myAlias,
-                                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-                            };
-                            broadcast(data);
-                            appendVoice("You", data);
+        function startRec() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('Voice not supported', 'red'); return; }
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+                recorder = new MediaRecorder(stream);
+                recorder.start();
+                audioChunks = [];
+                voiceBtn.classList.add('active');
+                recorder.ondataavailable = function(e) { audioChunks.push(e.data); };
+                recorder.onstop = function() {
+                    voiceBtn.classList.remove('active');
+                    var blob = new Blob(audioChunks, { type: 'audio/webm' });
+                    var reader = new FileReader();
+                    reader.onload = function() {
+                        var data = {
+                            type: 'VOICE', body: reader.result,
+                            user: document.getElementById('anon-mode').checked ? 'Anonymous' : myAlias,
+                            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         };
-                        reader.readAsDataURL(blob);
+                        broadcast(data);
+                        appendVoice('You', data);
                     };
-                    voiceBtn.classList.add('active');
-                })
-                .catch(err => alert("Mic access denied or unavailable"));
+                    reader.readAsDataURL(blob);
+                };
+            }).catch(function() { toast('Mic access denied', 'red'); });
         }
 
-        function stopRecording() {
+        function stopRec() {
             if (recorder && recorder.state === 'recording') {
                 recorder.stop();
-                recorder.stream.getTracks().forEach(track => track.stop());
-                voiceBtn.classList.remove('active');
+                recorder.stream.getTracks().forEach(function(t) { t.stop(); });
             }
         }
 
-        // Mouse events (desktop)
-        voiceBtn.addEventListener('mousedown', startRecording);
-        voiceBtn.addEventListener('mouseup', stopRecording);
-        voiceBtn.addEventListener('mouseleave', stopRecording);
-
-        // Touch events (mobile)
-        voiceBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); });
-        voiceBtn.addEventListener('touchend', stopRecording);
+        voiceBtn.addEventListener('mousedown', startRec);
+        voiceBtn.addEventListener('mouseup', stopRec);
+        voiceBtn.addEventListener('mouseleave', stopRec);
+        voiceBtn.addEventListener('touchstart', function(e) { e.preventDefault(); startRec(); });
+        voiceBtn.addEventListener('touchend', stopRec);
 
         function appendVoice(user, data) {
-            const box = document.getElementById('chat-box');
-            const div = document.createElement('div');
-            div.className = `msg ${user === "You" ? "my-msg" : "peer-msg"}`;
-            div.innerHTML = `
-                <div class="text-xs opacity-70 mb-2">${user} sent a voice message</div>
-                <audio controls class="w-full max-w-xs"><source src="${data.body}" type="audio/webm"></audio>
-            `;
+            var box = document.getElementById('chat-box');
+            var isMine = user === 'You';
+            var div = document.createElement('div');
+            div.className = 'msg ' + (isMine ? 'my-msg' : 'peer-msg');
+            div.innerHTML = '<div class="text-xs opacity-70 mb-2">' + escapeHtml(user) + ' sent a voice message</div>' +
+                '<audio controls style="width:100%;max-width:250px;height:32px;">' +
+                '<source src="' + escapeHtml(data.body) + '" type="audio/webm"></audio>';
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
         }
 
-        function updateOnlineCount() {
-            document.getElementById('online-count').innerText = Object.keys(peers).length;
+        document.getElementById('message-input').addEventListener('input', function() {
+            broadcast({ type: 'TYPING', user: myAlias });
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(function() { broadcast({ type: 'TYPING', user: null }); }, 1500);
+        });
+
+        function showTyping(u) {
+            document.getElementById('typing-ui').textContent = u + ' is typing...';
+        }
+        function hideTyping() {
+            document.getElementById('typing-ui').textContent = '';
         }
 
-        // Send on Enter
-        document.getElementById('message-input').addEventListener('keydown', e => {
+        document.getElementById('message-input').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') sendMessage();
         });
+
+        function copyMyId() {
+            var id = document.getElementById('my-id').innerText;
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(id).then(function() { toast('ID copied!', 'green'); });
+            } else {
+                var t = document.createElement('textarea');
+                t.value = id; document.body.appendChild(t); t.select();
+                document.execCommand('copy'); document.body.removeChild(t);
+                toast('ID copied!', 'green');
+            }
+        }
+
+        function toast(msg, color) {
+            var el = document.createElement('div');
+            el.className = 'toast';
+            el.style.background = color === 'green' ? '#22c55e' : color === 'red' ? '#ef4444' : '#334155';
+            el.textContent = msg;
+            document.getElementById('toasts').appendChild(el);
+            setTimeout(function() { el.remove(); }, 3000);
+        }
     </script>
 </body>
 </html>
